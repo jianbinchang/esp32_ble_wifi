@@ -4,6 +4,10 @@
   "idf.flashType": "UART",
   "idf.adapterTargetName": "esp32",
   "files.associations": {
-    "chrono": "c"
+    "chrono": "c",
+    "array": "c",
+    "string_view": "c",
+    "initializer_list": "c",
+    "utility": "c"
   }
 }

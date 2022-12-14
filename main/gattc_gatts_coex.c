@@ -26,6 +26,8 @@
 #include "esp_system.h"
 #include "sdkconfig.h"
 
+#include "driver/uart.h"
+#include "driver/gpio.h"
 
 #define GATTS_SERVICE_UUID_TEST_A   0x00FF
 #define GATTS_CHAR_UUID_TEST_A      0xFF01
@@ -52,11 +54,29 @@
 #define INVALID_HANDLE              0
 #define GATTS_ADV_NAME              "GATTC_GATTS_COEX"
 #define COEX_TAG                    "GATTC_GATTS_COEX"
+#define GATTC_TAG                   "GATTC_TAG"
 #define NOTIFY_ENABLE               0x0001
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
 
+//gpio
+#define ESP_INTR_FLAG_DEFAULT 0
+#define GPIO_INPUT_IO_0     4
+#define GPIO_INPUT_IO_1     5
+#define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1))
+
 static const char remote_device_name[] = "AP4001-0004";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
+QueueHandle_t spp_uart_queue = NULL;
+uint8_t mode_role = 0;
+uint8_t mode_change = 0;
+static bool is_connect = false;
+static uint16_t spp_conn_id = 0;
+
+
+typedef enum {
+    WIFI_CLOSE = 0x0,     /*!< Disable GPIO pull-up resistor */
+    WIFI_OPEN = 0x1,      /*!< Enable GPIO pull-up resistor */
+} mode_wifi;
 
 typedef struct {
     uint8_t                 *prepare_buf;
@@ -303,7 +323,6 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
@@ -326,6 +345,9 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         if (mtu_ret) {
             ESP_LOGE(COEX_TAG, "config MTU error, error code = %x\n", mtu_ret);
         }
+        is_connect = true;
+        spp_conn_id = p_data->connect.conn_id;
+        gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
         break;
     }
     case ESP_GATTC_OPEN_EVT:  /*gap 里面有open gatts*/
@@ -484,6 +506,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             ESP_LOGI(COEX_TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
         }
         esp_log_buffer_hex(COEX_TAG, p_data->notify.value, p_data->notify.value_len);
+
+        uart_write_bytes(UART_NUM_0, (char *)(p_data->notify.value), p_data->notify.value_len);/*carll*/
         break;
     case ESP_GATTC_WRITE_DESCR_EVT:
         if (p_data->write.status != ESP_GATT_OK) {
@@ -647,10 +671,12 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep) {
             ESP_LOGI(COEX_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(COEX_TAG, param->write.value, param->write.len);
+            uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);/*carll*/
+
             if (gatts_profile_tab[GATTS_PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == NOTIFY_ENABLE) {
-                    if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY) {
+                    if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY) {  /*打开notify上报*/
                         ESP_LOGI(COEX_TAG, "notify enable\n");
                         uint8_t notify_data[15];
                         for (int i = 0; i < sizeof(notify_data); ++ i) {
@@ -659,6 +685,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                         //the size of notify_data[] need less than MTU size
                         esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
                                                 sizeof(notify_data), notify_data, false);
+                       
                     }
                 } else if (descr_value == INDICATE_ENABLE) {
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_INDICATE) {
@@ -950,10 +977,142 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    if ( gpio_get_level(gpio_num) == 1)
+    {
+       mode_role = WIFI_OPEN;
+    }
+    else
+    {
+        mode_role = WIFI_CLOSE;
+    }
+    mode_change = 1;
+}
+
+static void mode_switch(void* arg)
+{
+    for(;;)
+    {
+        if(mode_change == 1)
+        {
+            printf("mode_change INIT mode_role %d\r\n",mode_role);
+            mode_change = 0;
+            switch(mode_role)
+            {
+                case WIFI_CLOSE:
+                    printf("wifi close\r\n");
+                break;
+                case WIFI_OPEN:
+                    printf("wifi open\r\n");
+                break;
+                default:
+                break;
+            }  
+        }
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
+
+void uart_task(void *pvParameters)
+{
+    uart_event_t event;
+    for (;;) 
+    {
+        //Waiting for UART event.
+        if (xQueueReceive(spp_uart_queue, (void * )&event, (TickType_t)portMAX_DELAY)) {
+            switch (event.type) {
+            //Event of UART receving data
+            case UART_DATA:
+                if (event.size && (is_connect == true)) {
+                    uint8_t * temp = NULL;
+                    temp = (uint8_t *)malloc(sizeof(uint8_t)*event.size);
+                    if(temp == NULL){
+                        ESP_LOGE("UART to BLE", "malloc failed,%s L#%d\n", __func__, __LINE__);
+                        break;
+                    }
+                    memset(temp, 0x0, event.size);
+                    uart_read_bytes(UART_NUM_0,temp,event.size,portMAX_DELAY);
+                    esp_log_buffer_hex("UART_RECEV", temp, event.size);
+
+                    if(*temp == '#' && *(temp+1) == '#')
+                    {
+                        ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
+                         esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
+                                                gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
+                                                gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
+                                                event.size-2, temp+2, false);  
+                    }
+                    else
+                    {
+                        ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
+                        esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
+                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
+                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
+                                              event.size,
+                                              temp,
+                                              ESP_GATT_WRITE_TYPE_NO_RSP,
+                                              ESP_GATT_AUTH_REQ_NONE);
+                    }
+                    free(temp);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+static void spp_uart_init(void)
+{
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_RTS,
+        .rx_flow_ctrl_thresh = 122,
+        .source_clk = UART_SCLK_APB,  //UART_SCLK_DEFAULT
+    };
+
+    //Install UART driver, and get the queue.
+    uart_driver_install(UART_NUM_0, 4096, 8192, 20, &spp_uart_queue, 0);
+    //Set UART parameters
+    uart_param_config(UART_NUM_0, &uart_config);
+    //Set UART pins
+    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    xTaskCreate(uart_task, "uTask", 2048, (void*)UART_NUM_0, 8, NULL);
+}
+
 void app_main(void)
 {
-    esp_err_t ret;
+    /*init gpio*/
+    //zero-initialize the config structure.
+    gpio_config_t io_conf = {};
+    //interrupt of rising edge
+    io_conf.intr_type = GPIO_INTR_ANYEDGE;                 /*双边沿*/
+    //bit mask of the pins, use GPIO4/5 here
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    //set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
 
+    //install gpio isr service
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
+    //change gpio intrrupt type for one pin
+    //gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
+     printf("GPIO INIT\r\n");
+    
+    esp_err_t ret;
     // Initialize NVS.
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1030,6 +1189,9 @@ void app_main(void)
     if (local_mtu_ret) {
         ESP_LOGE(COEX_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
+
+    //xTaskCreate(mode_switch, "mode_switch", 2048, NULL, 6, NULL);
+    spp_uart_init();
 
     return;
 }
