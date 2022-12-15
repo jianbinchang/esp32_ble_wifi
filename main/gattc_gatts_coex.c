@@ -55,6 +55,7 @@
 #define GATTS_ADV_NAME              "GATTC_GATTS_COEX"
 #define COEX_TAG                    "GATTC_GATTS_COEX"
 #define GATTC_TAG                   "GATTC_TAG"
+#define GATTS_TAG                   "GATTS_TAG"
 #define NOTIFY_ENABLE               0x0001
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
@@ -96,6 +97,7 @@ struct gatts_profile_inst {
     esp_gatt_char_prop_t property;
     uint16_t descr_handle;
     esp_bt_uuid_t descr_uuid;
+    esp_bd_addr_t remote_bda; //carll_add
 };
 
 struct gattc_profile_inst {
@@ -336,6 +338,12 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         }
         break;
     case ESP_GATTC_CONNECT_EVT: {
+        ESP_LOGI(COEX_TAG, "carll ESP_GATTC_CONNECT_EVT\n");
+        if(p_data->connect.link_role == 1)  //0 master  1 slave
+        {
+            ESP_LOGI(COEX_TAG, "carll test ...\n");
+            break;
+        }
         ESP_LOGI(COEX_TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d\n", p_data->connect.conn_id, gattc_if);
         gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
         memcpy(gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
@@ -544,9 +552,18 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     case ESP_GATTC_DISCONNECT_EVT: {
         connect = false;
         get_server = false;
-        ESP_LOGI(COEX_TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d\n", p_data->disconnect.reason);
+        ESP_LOGI(COEX_TAG, "ESP_GATTC_DISCONNECT_EVT carll, reason = %d\n", p_data->disconnect.reason);
+        //ESP_LOGI(GATTC_TAG, "p_data->connect.conn_id = %s\n",p_data->disconnect.remote_bda);
         //free_gattc_srv_db();
-        esp_ble_gap_start_scanning(0); /*一直扫描*/
+        ESP_LOGI(GATTC_TAG, "DISCONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x\n",
+                 p_data->disconnect.conn_id,
+                 p_data->disconnect.remote_bda[0], p_data->disconnect.remote_bda[1], p_data->disconnect.remote_bda[2],
+                 p_data->disconnect.remote_bda[3], p_data->disconnect.remote_bda[4], p_data->disconnect.remote_bda[5]);
+        if(memcmp(p_data->disconnect.remote_bda,gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda,sizeof(esp_bd_addr_t)) == 0)  
+        {
+            ESP_LOGI(COEX_TAG, "ESP_GATTC_DISCONNECT_EVT carll, reason = %d\n", p_data->disconnect.reason);
+            esp_ble_gap_start_scanning(0); /*一直扫描*/
+        }        
         break;
     }
     default:
@@ -759,16 +776,31 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         break;
     case ESP_GATTS_CONNECT_EVT: {
 
+        if(param->connect.link_role == 0)  //0 master  1 slave
+        {
+            ESP_LOGI(COEX_TAG, "ESP_GATTS_CONNECT_EVT break carll test ...\n");
+            break;
+        }
+
         ESP_LOGI(COEX_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x\n",
                  param->connect.conn_id,
                  param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
                  param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+        memcpy(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));   //carll_modify
         gatts_profile_tab[GATTS_PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
         ESP_LOGI(COEX_TAG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x\n", param->disconnect.reason);
-        esp_ble_gap_start_advertising(&adv_params);
+        //ESP_LOGI(GATTS_TAG, "p_data->connect.conn_id = %d\n",param->connect.remote_bda);
+         ESP_LOGI(GATTS_TAG, "DISCONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x\n",
+                 param->disconnect.conn_id,
+                 param->disconnect.remote_bda[0], param->disconnect.remote_bda[1], param->disconnect.remote_bda[2],
+                 param->disconnect.remote_bda[3], param->disconnect.remote_bda[4], param->disconnect.remote_bda[5]);
+        if(memcmp(param->disconnect.remote_bda,gatts_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda,sizeof(esp_bd_addr_t)) == 0)
+        {
+            esp_ble_gap_start_advertising(&adv_params);
+        }
         break;
     case ESP_GATTS_CONF_EVT:
         ESP_LOGI(COEX_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d\n", param->conf.status, param->conf.handle);
