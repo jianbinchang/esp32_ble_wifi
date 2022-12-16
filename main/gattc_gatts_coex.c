@@ -60,11 +60,16 @@
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
 
-//gpio
+//gpio input
 #define ESP_INTR_FLAG_DEFAULT 0
 #define GPIO_INPUT_IO_0     4
-#define GPIO_INPUT_IO_1     5
-#define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1))
+#define AP_WAKE_BT_R        37   /*主控开关wifi*/
+#define GPIO_INPUT_PIN_SEL  (1ULL<<AP_WAKE_BT_R)
+//gpio output
+#define BT_WAKE_AP_R 18  /*本体连接成功*/
+#define WL_WAKE_AP_R 5   /*手机连接成功*/
+//#define BT_RST_N_R   36  /*wifi statu*/  //这个是输入脚
+#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<BT_WAKE_AP_R) | (1ULL<<WL_WAKE_AP_R))
 
 static const char remote_device_name[] = "AP4001-0004";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
 QueueHandle_t spp_uart_queue = NULL;
@@ -72,7 +77,6 @@ uint8_t mode_role = 0;
 uint8_t mode_change = 0;
 static bool is_connect = false;
 static uint16_t spp_conn_id = 0;
-
 
 typedef enum {
     WIFI_CLOSE = 0x0,     /*!< Disable GPIO pull-up resistor */
@@ -111,6 +115,7 @@ struct gattc_profile_inst {
     esp_bd_addr_t remote_bda;
 };
 
+void ap_tcp_server(void);
 ///Declare the static function
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
@@ -356,6 +361,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         is_connect = true;
         spp_conn_id = p_data->connect.conn_id;
         gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
+        gpio_set_level(BT_WAKE_AP_R, 1);  /*本体连接成功*/
         break;
     }
     case ESP_GATTC_OPEN_EVT:  /*gap 里面有open gatts*/
@@ -562,7 +568,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         if(memcmp(p_data->disconnect.remote_bda,gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda,sizeof(esp_bd_addr_t)) == 0)  
         {
             ESP_LOGI(COEX_TAG, "ESP_GATTC_DISCONNECT_EVT carll, reason = %d\n", p_data->disconnect.reason);
-            esp_ble_gap_start_scanning(0); /*一直扫描*/
+            esp_ble_gap_start_scanning(0);     /*一直扫描*/
+            gpio_set_level(BT_WAKE_AP_R, 0);  /*本体断开连接*/
         }        
         break;
     }
@@ -788,6 +795,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                  param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
         memcpy(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));   //carll_modify
         gatts_profile_tab[GATTS_PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
+
+        gpio_set_level(WL_WAKE_AP_R, 1);  /*手机连接成功*/
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -800,6 +809,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if(memcmp(param->disconnect.remote_bda,gatts_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda,sizeof(esp_bd_addr_t)) == 0)
         {
             esp_ble_gap_start_advertising(&adv_params);
+            gpio_set_level(WL_WAKE_AP_R, 0);  /*手机断开连接*/
         }
         break;
     case ESP_GATTS_CONF_EVT:
@@ -1023,29 +1033,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     mode_change = 1;
 }
 
-static void mode_switch(void* arg)
-{
-    for(;;)
-    {
-        if(mode_change == 1)
-        {
-            printf("mode_change INIT mode_role %d\r\n",mode_role);
-            mode_change = 0;
-            switch(mode_role)
-            {
-                case WIFI_CLOSE:
-                    printf("wifi close\r\n");
-                break;
-                case WIFI_OPEN:
-                    printf("wifi open\r\n");
-                break;
-                default:
-                break;
-            }  
-        }
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-}
+
 
 void uart_task(void *pvParameters)
 {
@@ -1122,10 +1110,27 @@ static void spp_uart_init(void)
 void app_main(void)
 {
     /*init gpio*/
+
     //zero-initialize the config structure.
     gpio_config_t io_conf = {};
+    
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO18/19
+    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //disable pull-up mode
+    io_conf.pull_up_en = 0;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+
+    memset(&io_conf,0,sizeof(io_conf));
+    gpio_pad_select_gpio(AP_WAKE_BT_R);
     //interrupt of rising edge
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;                 /*双边沿*/
+    io_conf.intr_type = GPIO_INTR_ANYEDGE;                 /*双边沿 GPIO_INTR_ANYEDGE*/
     //bit mask of the pins, use GPIO4/5 here
     io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
     //set as input mode
@@ -1137,9 +1142,7 @@ void app_main(void)
     //install gpio isr service
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
+    gpio_isr_handler_add(AP_WAKE_BT_R, gpio_isr_handler, (void*) AP_WAKE_BT_R);
     //change gpio intrrupt type for one pin
     //gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
      printf("GPIO INIT\r\n");
@@ -1153,6 +1156,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK( ret );
 
+#if 1
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -1222,8 +1226,11 @@ void app_main(void)
         ESP_LOGE(COEX_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
 
-    //xTaskCreate(mode_switch, "mode_switch", 2048, NULL, 6, NULL);
     spp_uart_init();
+ #endif   
 
+    ap_tcp_server();
+    
+    
     return;
 }

@@ -9,6 +9,7 @@
     "string_view": "c",
     "initializer_list": "c",
     "utility": "c",
-    "*.inc": "c"
+    "*.inc": "c",
+    "gpio.h": "c"
   }
 }
