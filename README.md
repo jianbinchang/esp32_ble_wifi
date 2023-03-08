@@ -15,3 +15,4 @@ To test this example, you can run the [gatt_client_demo](../../ble/gatt_client),
 Please check the [tutorial](../../ble/gatt_server/tutorial/Gatt_Server_Example_Walkthrough.md) for more information about the gatts part of this example.
 Please check the [tutorial](../../ble/gatt_client/tutorial/Gatt_Client_Example_Walkthrough.md) for more information about the gattc part of this example.
 
+evt 2 
