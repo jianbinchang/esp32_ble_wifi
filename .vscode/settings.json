@@ -10,6 +10,23 @@
     "initializer_list": "c",
     "utility": "c",
     "*.inc": "c",
-    "gpio.h": "c"
+    "gpio.h": "c",
+    "*.ipp": "c",
+    "user_gpio.h": "c",
+    "sdkconfig.h": "c",
+    "nvs_flash.h": "c",
+    "stdio.h": "c",
+    "user_ble.h": "c",
+    "nvs.h": "c",
+    "esp_bt.h": "c",
+    "esp_gattc_api.h": "c",
+    "user_sdio.h": "c",
+    "esp_system.h": "c",
+    "uart.h": "c",
+    "sdio_slave.h": "c",
+    "slc_struct.h": "c",
+    "freertos.h": "c",
+    "task.h": "c",
+    "event_groups.h": "c"
   }
 }

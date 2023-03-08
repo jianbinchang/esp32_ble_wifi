@@ -1,3 +1,10 @@
+
+
+void func(void)
+{
+
+}
+
 /*
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -10,8 +17,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "nvs.h"
-#include "nvs_flash.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -25,9 +30,11 @@
 #include "esp_bt_defs.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
+#include "user_ble.h"
+#include "driver/gpio.h"
+#include "user_gpio.h"
 
 #include "driver/uart.h"
-#include "driver/gpio.h"
 
 #define GATTS_SERVICE_UUID_TEST_A   0x00FF
 #define GATTS_CHAR_UUID_TEST_A      0xFF01
@@ -52,7 +59,7 @@
 #define REMOTE_SERVICE_UUID         0xFFE0
 #define REMOTE_NOTIFY_CHAR_UUID     0xFFE1
 #define INVALID_HANDLE              0
-#define GATTS_ADV_NAME              "GATTC_GATTS_COEX"
+#define GATTS_ADV_NAME              "SUBLUE_BLE"                    //"GATTC_GATTS_COEX"
 #define COEX_TAG                    "GATTC_GATTS_COEX"
 #define GATTC_TAG                   "GATTC_TAG"
 #define GATTS_TAG                   "GATTS_TAG"
@@ -60,22 +67,14 @@
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
 
-//gpio input
-#define ESP_INTR_FLAG_DEFAULT 0
-#define GPIO_INPUT_IO_0     4
-#define AP_WAKE_BT_R        37   /*主控开关wifi*/
-#define GPIO_INPUT_PIN_SEL  (1ULL<<AP_WAKE_BT_R)
-//gpio output
-#define BT_WAKE_AP_R 18  /*本体连接成功*/
-#define WL_WAKE_AP_R 5   /*手机连接成功*/
-//#define BT_RST_N_R   36  /*wifi statu*/  //这个是输入脚
-#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<BT_WAKE_AP_R) | (1ULL<<WL_WAKE_AP_R))
-
-static const char remote_device_name[] = "AP4001-0004";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
 QueueHandle_t spp_uart_queue = NULL;
+
+static const char remote_device_name[] = "AP8001-0001";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
+
 uint8_t mode_role = 0;
 uint8_t mode_change = 0;
-static bool is_connect = false;
+bool is_connect = false;
+bool is_connect_ap = false;
 static uint16_t spp_conn_id = 0;
 
 typedef enum {
@@ -289,7 +288,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT: {
         ESP_LOGI(COEX_TAG, "ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT, set scan sparameters complete\n");
         //the unit of the duration is second
-        uint32_t duration = 120;
+        uint32_t duration = 0;                                                                            //第一次开机扫描两分钟 120 改成一直扫描
         esp_ble_gap_start_scanning(duration);
         break;
     }
@@ -529,17 +528,19 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             break;
         }
         ESP_LOGI(COEX_TAG, "write descr success \n");
+#if 0 
         uint8_t write_char_data[35];
         for (int i = 0; i < sizeof(write_char_data); ++ i) {
             write_char_data[i] = i % 256;
         }
-        esp_ble_gattc_write_char( gattc_if,
+        esp_ble_gattc_write_char( gattc_if,                                                     /*刚连接时候会上报给服务端carll_delete*/
                                   gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
                                   gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
                                   sizeof(write_char_data),
                                   write_char_data,
                                   ESP_GATT_WRITE_TYPE_RSP,
                                   ESP_GATT_AUTH_REQ_NONE);
+#endif
         break;
     case ESP_GATTC_SRVC_CHG_EVT: {
         esp_bd_addr_t bda;
@@ -556,7 +557,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         ESP_LOGI(COEX_TAG, "write char success \n");
         break;
     case ESP_GATTC_DISCONNECT_EVT: {
-        connect = false;
+        connect = false;                      /*scan 标志*/
+        is_connect = false;
         get_server = false;
         ESP_LOGI(COEX_TAG, "ESP_GATTC_DISCONNECT_EVT carll, reason = %d\n", p_data->disconnect.reason);
         //ESP_LOGI(GATTC_TAG, "p_data->connect.conn_id = %s\n",p_data->disconnect.remote_bda);
@@ -797,6 +799,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         gatts_profile_tab[GATTS_PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
 
         gpio_set_level(WL_WAKE_AP_R, 1);  /*手机连接成功*/
+        is_connect_ap = true;
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -810,6 +813,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         {
             esp_ble_gap_start_advertising(&adv_params);
             gpio_set_level(WL_WAKE_AP_R, 0);  /*手机断开连接*/
+            is_connect_ap = false;
         }
         break;
     case ESP_GATTS_CONF_EVT:
@@ -1019,144 +1023,14 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-static void IRAM_ATTR gpio_isr_handler(void* arg)
+
+
+
+
+void user_ble_init(void)
 {
-    uint32_t gpio_num = (uint32_t) arg;
-    if ( gpio_get_level(gpio_num) == 1)
-    {
-       mode_role = WIFI_OPEN;
-    }
-    else
-    {
-        mode_role = WIFI_CLOSE;
-    }
-    mode_change = 1;
-}
+     esp_err_t ret;
 
-
-
-void uart_task(void *pvParameters)
-{
-    uart_event_t event;
-    for (;;) 
-    {
-        //Waiting for UART event.
-        if (xQueueReceive(spp_uart_queue, (void * )&event, (TickType_t)portMAX_DELAY)) {
-            switch (event.type) {
-            //Event of UART receving data
-            case UART_DATA:
-                if (event.size && (is_connect == true)) {
-                    uint8_t * temp = NULL;
-                    temp = (uint8_t *)malloc(sizeof(uint8_t)*event.size);
-                    if(temp == NULL){
-                        ESP_LOGE("UART to BLE", "malloc failed,%s L#%d\n", __func__, __LINE__);
-                        break;
-                    }
-                    memset(temp, 0x0, event.size);
-                    uart_read_bytes(UART_NUM_0,temp,event.size,portMAX_DELAY);
-                    esp_log_buffer_hex("UART_RECEV", temp, event.size);
-
-                    if(*temp == '#' && *(temp+1) == '#')
-                    {
-                        ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
-                         esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
-                                                gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
-                                                gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
-                                                event.size-2, temp+2, false);  
-                    }
-                    else
-                    {
-                        ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
-                        esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
-                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
-                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
-                                              event.size,
-                                              temp,
-                                              ESP_GATT_WRITE_TYPE_NO_RSP,
-                                              ESP_GATT_AUTH_REQ_NONE);
-                    }
-                    free(temp);
-                }
-                break;
-            default:
-                break;
-            }
-        }
-    }
-    vTaskDelete(NULL);
-}
-
-static void spp_uart_init(void)
-{
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_RTS,
-        .rx_flow_ctrl_thresh = 122,
-        .source_clk = UART_SCLK_APB,  //UART_SCLK_DEFAULT
-    };
-
-    //Install UART driver, and get the queue.
-    uart_driver_install(UART_NUM_0, 4096, 8192, 20, &spp_uart_queue, 0);
-    //Set UART parameters
-    uart_param_config(UART_NUM_0, &uart_config);
-    //Set UART pins
-    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    xTaskCreate(uart_task, "uTask", 2048, (void*)UART_NUM_0, 8, NULL);
-}
-
-void app_main(void)
-{
-    /*init gpio*/
-
-    //zero-initialize the config structure.
-    gpio_config_t io_conf = {};
-    
-    //disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-    io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
-
-    memset(&io_conf,0,sizeof(io_conf));
-    gpio_pad_select_gpio(AP_WAKE_BT_R);
-    //interrupt of rising edge
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;                 /*双边沿 GPIO_INTR_ANYEDGE*/
-    //bit mask of the pins, use GPIO4/5 here
-    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-    //set as input mode
-    io_conf.mode = GPIO_MODE_INPUT;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
-
-    //install gpio isr service
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(AP_WAKE_BT_R, gpio_isr_handler, (void*) AP_WAKE_BT_R);
-    //change gpio intrrupt type for one pin
-    //gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
-     printf("GPIO INIT\r\n");
-    
-    esp_err_t ret;
-    // Initialize NVS.
-    ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK( ret );
-
-#if 1
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -1226,11 +1100,78 @@ void app_main(void)
         ESP_LOGE(COEX_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
 
-    spp_uart_init();
- #endif   
-
-    ap_tcp_server();
-    
-    
+    //spp_uart_init();   
     return;
+}
+
+void uart_task(void *pvParameters)
+{
+    uart_event_t event;
+    for (;;) 
+    {
+        //Waiting for UART event.
+        if (xQueueReceive(spp_uart_queue, (void * )&event, (TickType_t)portMAX_DELAY)) {
+            switch (event.type) {
+            //Event of UART receving data
+            case UART_DATA:
+                if (event.size) {
+                    uint8_t * temp = NULL;
+                    temp = (uint8_t *)malloc(sizeof(uint8_t)*event.size);
+                    if(temp == NULL){
+                        ESP_LOGE("UART to BLE", "malloc failed,%s L#%d\n", __func__, __LINE__);
+                        break;
+                    }
+                    memset(temp, 0x0, event.size);
+                    uart_read_bytes(UART_NUM_0,temp,event.size,portMAX_DELAY);
+                    esp_log_buffer_hex("UART_RECEV", temp, event.size);
+
+                    if((*temp == '#') && (*(temp+1) == '#') && (is_connect_ap = true))
+                    {
+                        ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
+                         esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
+                                                gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
+                                                gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
+                                                event.size-2, temp+2, false);  
+                    }
+                    else if(is_connect == true)
+                    {
+                        ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
+                        esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
+                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
+                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
+                                              event.size,
+                                              temp,
+                                              ESP_GATT_WRITE_TYPE_NO_RSP,
+                                              ESP_GATT_AUTH_REQ_NONE);
+                    }
+                    free(temp);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+void spp_uart_init(void)
+{
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_RTS,
+        .rx_flow_ctrl_thresh = 122,
+        .source_clk = UART_SCLK_APB,  //UART_SCLK_DEFAULT
+    };
+
+    //Install UART driver, and get the queue.
+    uart_driver_install(UART_NUM_0, 4096, 8192, 20, &spp_uart_queue, 0);
+    //Set UART parameters
+    uart_param_config(UART_NUM_0, &uart_config);
+    //Set UART pins
+    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    xTaskCreate(uart_task, "uTask", 2048, (void*)UART_NUM_0, 8, NULL);
 }
