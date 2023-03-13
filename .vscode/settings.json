@@ -27,6 +27,8 @@
     "slc_struct.h": "c",
     "freertos.h": "c",
     "task.h": "c",
-    "event_groups.h": "c"
-  }
+    "event_groups.h": "c",
+    "pthread.h": "c"
+  },
+  "idf.espIdfPathWin": "D:/Espressif/frameworks/esp-idf-v4.3.4/"
 }
