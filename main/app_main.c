@@ -35,7 +35,8 @@ QueueHandle_t Queue_Handle, My_Queue_Handle;
     user_ble_init();
 
     spp_uart_init();
-    
+
+ //wifi功能暂时没有启用   
 #if SDIO_WIFI
      //creat event group
     Event_Handle = xEventGroupCreate();
