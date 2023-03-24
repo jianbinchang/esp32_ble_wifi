@@ -127,6 +127,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 static void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 static void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
+static void set_ble_peidui(char* str, uint16_t len);
+
 static esp_gatt_char_prop_t a_property = 0;
 static esp_gatt_char_prop_t b_property = 0;
 static prepare_type_env_t a_prepare_write_env;
@@ -325,12 +327,17 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                         {
                             printf("nvs_set_blob \r\n");
                         }
+                        else
+                        {
+                            esp_log_buffer_hex("nvs_set_blob", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+                        }
                          // Commit
                         err = nvs_commit(my_handle);
                         if (err != ESP_OK) 
                         {
                             printf("nvs_commit \r\n");
                         }
+                        
                          // Close
                         nvs_close(my_handle);
                         if (err != ESP_OK) 
@@ -350,7 +357,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                         {
                             connect = true;
                             esp_ble_gap_stop_scanning();
-                            esp_ble_gattc_open(gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if, scan_result->scan_rst.bda, scan_result->scan_rst.ble_addr_type, true); /*打开直接连接远程设备 carll*/
+                            esp_ble_gattc_open(gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if, scan_result->scan_rst.bda, scan_result->scan_rst.ble_addr_type, true); /*打开直接连接远程设备 相当于连接到安森美服务端carll*/
                         }
                     }
                 }
@@ -393,7 +400,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         memcpy(gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
         ESP_LOGI(GATTC_TAG, "REMOTE BDA:");
         esp_log_buffer_hex(GATTC_TAG, gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, sizeof(esp_bd_addr_t));
-        esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);
+        esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);         /*设置安森美的mtu请求*/
         if (mtu_ret) {
             ESP_LOGE(GATTC_TAG, "config MTU error, error code = %x\n", mtu_ret);
         }
@@ -403,7 +410,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         gpio_set_level(BT_WAKE_AP_R, 1);  /*本体连接成功*/
         break;
     }
-    case ESP_GATTC_OPEN_EVT:  /*gap 里面有open gatts*/
+    case ESP_GATTC_OPEN_EVT:                                                                        /*gap 里面有open gatts*/
         if (param->open.status != ESP_GATT_OK) {
             ESP_LOGE(GATTC_TAG, "open failed, status %d\n", p_data->open.status);                   /*bug 距离远的时候连接不上来这 carll*/
             break;
@@ -420,7 +427,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     case ESP_GATTC_CFG_MTU_EVT:
         if (param->cfg_mtu.status != ESP_GATT_OK) {
-            ESP_LOGE(GATTC_TAG,"config mtu failed, error status = %x\n", param->cfg_mtu.status);    /*这里设置没有成功 ？？？*/
+            ESP_LOGE(GATTC_TAG,"config mtu failed, error status = %x\n", param->cfg_mtu.status);    /*设置安森美的mtu请求没有成功  carll*/
         }
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d\n", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
         break;
@@ -723,11 +730,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 4;
-        rsp.attr_value.value[0] = 0xde;
-        rsp.attr_value.value[1] = 0xed;
-        rsp.attr_value.value[2] = 0xbe;
-        rsp.attr_value.value[3] = 0xef;
+        rsp.attr_value.len = 6;
+        memcpy(rsp.attr_value.value, save_bound_add, rsp.attr_value.len);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -737,6 +741,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+            set_ble_peidui((char*)param->write.value, param->write.len);                        /*app 端设置ble 配对*/
             uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);/*carll*/
 
             if (gatts_profile_tab[GATTS_PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
@@ -1080,6 +1085,11 @@ void user_ble_init(void)
     {
         printf("nvs_get_blob %d required_size: %d \r\n",err,required_size);
     }
+    else
+    {
+         esp_log_buffer_hex("nvs_get_blob", save_bound_add, ESP_BD_ADDR_LEN);
+    }
+   
     if (required_size == 0) 
     {
         printf("Nothing saved yet!\n");
@@ -1163,18 +1173,27 @@ void user_ble_init(void)
     return;
 }
 
-int save_remote_bound_add()
+static int save_remote_bound_add()
 {
     if(is_connect == 1)
     {
         esp_ble_gap_disconnect(save_bound_add);
+        esp_ble_gap_start_scanning(0);     /*一直扫描*/
     }
     
-    esp_ble_gap_start_scanning(0);     /*一直扫描*/
-
     save_flag = 1;                     /*保存标志位*/
 
     return 0;
+}
+
+static void set_ble_peidui(char* str, uint16_t len)
+{
+    if(strncmp(str, "peidui", len) == 0)
+    {
+        save_remote_bound_add();
+    }
+    
+    return ;
 }
 
 void uart_task(void *pvParameters)
