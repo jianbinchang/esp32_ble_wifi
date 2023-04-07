@@ -60,7 +60,7 @@ void func(void)
 #define REMOTE_SERVICE_UUID         0xFFE0
 #define REMOTE_NOTIFY_CHAR_UUID     0xFFE1
 #define INVALID_HANDLE              0
-#define GATTS_ADV_NAME              "SUBLUE_BLE"                    //"GATTC_GATTS_COEX"
+#define GATTS_ADV_NAME              "PUMP-0001"                    //"GATTC_GATTS_COEX"
 #define COEX_TAG                    "GATTC_GATTS_COEX"
 #define GATTC_TAG                   "GATTC_TAG"
 #define GATTS_TAG                   "GATTS_TAG"
@@ -737,12 +737,15 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         break;
     }
     case ESP_GATTS_WRITE_EVT: {
+        char temp[255] = {'#','#',};
         ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
             set_ble_peidui((char*)param->write.value, param->write.len);                        /*app 端设置ble 配对*/
-            uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);/*carll*/
+            memcpy(temp+2, param->write.value, param->write.len);
+            //uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);      /*carll*/
+            uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                      /*add carll 230405 韦工要求app端收取数据加##*/
 
             if (gatts_profile_tab[GATTS_PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
@@ -1190,6 +1193,7 @@ static void set_ble_peidui(char* str, uint16_t len)
 {
     if(strncmp(str, "peidui", len) == 0)
     {
+        //printf("set_ble_peidui \r\n");
         save_remote_bound_add();
     }
     
