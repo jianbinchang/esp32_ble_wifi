@@ -25,12 +25,12 @@
 
 #include "nvs_flash.h"
 
-#define ESP_AT_SDIO_BUFFER_SIZE      512
-#define ESP_AT_SDIO_BUFFER_NUM       20
+#define ESP_AT_SDIO_BUFFER_SIZE      2048
+#define ESP_AT_SDIO_BUFFER_NUM       10
 #define ESP_AT_SDIO_QUEUE_SIZE       10
 
-extern QueueHandle_t Queue_Handle;
-extern QueueHandle_t My_Queue_Handle;
+extern QueueHandle_t Tcp_To_Sdio_Queue_Handle;
+extern QueueHandle_t Sdio_to_Tcp__Queue_Handle;
 
 static const char* TAG = "esp32_sdio";
 
@@ -106,22 +106,15 @@ static void at_sdio_recv_task(void* pvParameters)
             ESP_LOGE(TAG, "Recv error,ret:%x", ret);
             continue;
         }
-        //read_count += length;
 
         printf("SDIO slave receive(%d)\n", length);
 
-         ESP_LOG_BUFFER_HEXDUMP(TAG, ptr, length, ESP_LOG_INFO);
+        ESP_LOG_BUFFER_HEXDUMP(TAG, ptr, length, ESP_LOG_INFO);
         
-        // for (int i=0;i<length;i++) {
-        //     printf("%c", ptr[i]);
-        // }
-        // printf("\n");
-
-        if( xQueueSend(My_Queue_Handle,ptr,0) == pdTRUE)   
+        if( xQueueSend(Sdio_to_Tcp__Queue_Handle,ptr,0) == pdTRUE)   
         {
             printf("sdio send queue sussesful \n");
         }
-
 
         // echo data to SDIO host
         //esp32_sdio_write_data(ptr, length);
@@ -131,25 +124,34 @@ static void at_sdio_recv_task(void* pvParameters)
     }
 }
 
+#if 1
+int send_data_to_sdio(unsigned char* buf, unsigned int len)
+{
+    printf("send_data_to_sdio len %d\n",len);
+    return esp32_sdio_write_data(buf, len);               
+}
+
+#else
+static uint8_t sdio_buf[4096] = {0};
 static void at_sdio_send_task(void* pvParameters)
 {
-    uint8_t buf[128] = {0};
     for (;;)
     {
-        if( pdTRUE == xQueueReceive(Queue_Handle,buf,portMAX_DELAY))
+        if( pdTRUE == xQueueReceive(Tcp_To_Sdio_Queue_Handle, sdio_buf, portMAX_DELAY))
         {
             printf("接收到tcp 的消息队列\n");
             // echo data to SDIO host
-            esp32_sdio_write_data(buf, 128);
+            esp32_sdio_write_data(sdio_buf, 4096);                   //4096
+            memset(sdio_buf, 0, 128);
         }
     }
 }
+#endif
 
 void sdio_init(void)
 {
     // init slave driver
     esp32_sdio_slave_init();
-
     xTaskCreate(at_sdio_recv_task , "at_sdio_recv_task" , 4096 , NULL , 5 , NULL);
-    xTaskCreate(at_sdio_send_task , "at_sdio_send_task" , 4096 , NULL , 10, NULL);
+    //xTaskCreate(at_sdio_send_task , "at_sdio_send_task" , 4096 , NULL , 10, NULL);
 }

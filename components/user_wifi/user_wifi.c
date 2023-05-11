@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include "user_wifi.h"
 
-
-
-
 /* BSD Socket API Example
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
@@ -30,6 +27,9 @@
 #include "driver/gpio.h"
 #include "freertos/event_groups.h"
 
+#include "user_sdio.h"
+#include "driver/uart.h"
+
 #define PORT                        3333
 #define KEEPALIVE_IDLE              5
 #define KEEPALIVE_INTERVAL          5
@@ -51,8 +51,8 @@ int sock;
 extern uint8_t mode_role;
 extern uint8_t mode_change;
 extern EventGroupHandle_t Event_Handle;
-extern QueueHandle_t Queue_Handle;
-extern QueueHandle_t My_Queue_Handle;
+extern QueueHandle_t Tcp_To_Sdio_Queue_Handle;
+extern QueueHandle_t Sdio_to_Tcp__Queue_Handle;
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
@@ -68,20 +68,28 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+char rx_buffer[4096] = {0};
 static void do_retransmit(const int sock)
 {
-    int len;
-    char rx_buffer[128] = {0};
+   int len;
+   long temp_len = 0;
 
     do {
-        len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+        len = recv(sock, rx_buffer, sizeof(rx_buffer), 0);
         if (len < 0) {
             ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
         } else if (len == 0) {
             ESP_LOGW(TAG, "Connection closed");
         } else {
-            rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
-            ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
+           // rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
+            //ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
+            temp_len += len;
+           // ESP_LOGI(TAG, "Received %d %ld", len, temp_len);
+            //ESP_LOG_BUFFER_HEXDUMP("test", rx_buffer, len, ESP_LOG_INFO);
+            //ESP_LOG_BUFFER_HEX(TAG, rx_buffer, len);
+
+            //串口测试
+            uart_write_bytes(UART_NUM_0, (char *)rx_buffer,len);
 
             // send() can return less bytes than supplied length.
             // Walk-around for robust implementation.
@@ -89,15 +97,22 @@ static void do_retransmit(const int sock)
             /*tcp receive  sdio send carll*/
             // xEventGroupSetBits(Event_Handle,BIT1);   //事件标志组
 
-            #if 1
-            if( pdTRUE == xQueueSend(Queue_Handle,rx_buffer,0) )
+            #if 0
+            int sdio_len = send_data_to_sdio(rx_buffer, len);                               /*网口会有很高延时 会有粘包发生，包数过多时候sdio会死掉；sdio写会很浪费时间？？*/
+            if(sdio_len > 0)
             {
-                //printf("tcp send queue susessful");
-                ESP_LOGI(TAG, "tcp send queue susessful");
+                ESP_LOGI(TAG, "send_data_to_sdio %d ", sdio_len);
             }
             #endif
 
             #if 0
+            if( pdTRUE == xQueueSend(Tcp_To_Sdio_Queue_Handle,rx_buffer,0) )
+            {
+                ESP_LOGI(TAG, "tcp send queue susessful");
+            }
+            #endif
+
+            #if 0   //收到客户端数据再给发回去
             int to_write = len;
             while (to_write > 0) {
                 int written = send(sock, rx_buffer + (len - to_write), to_write, 0);
@@ -111,8 +126,7 @@ static void do_retransmit(const int sock)
     } while (len > 0);
 }
 
-
-static void tcp_server_task(void *pvParameters)
+static void tcp_server_receive_task(void *pvParameters)
 {
     char addr_str[128];
     int addr_family = (int)pvParameters;
@@ -121,6 +135,7 @@ static void tcp_server_task(void *pvParameters)
     int keepIdle = KEEPALIVE_IDLE;
     int keepInterval = KEEPALIVE_INTERVAL;
     int keepCount = KEEPALIVE_COUNT;
+    //int tcp_nodelay = 1;
     struct sockaddr_storage dest_addr;
 
     if (addr_family == AF_INET) {
@@ -173,7 +188,8 @@ static void tcp_server_task(void *pvParameters)
         setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(int));
         setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(int));
         setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(int));
-        setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int)); 
+        //setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &tcp_nodelay, sizeof(int));
         // Convert ip address to string
         if (source_addr.ss_family == PF_INET) {
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
@@ -182,22 +198,65 @@ static void tcp_server_task(void *pvParameters)
 
         do_retransmit(sock);
 
-        /*sdio receive  tcp send*/
-        #if 0    
-        if( pdTRUE == xQueueReceive(My_Queue_Handle,sdio_buf,1000)) //不行 carll
-        {
-            ESP_LOGI("carll","接送到sdio 发送的消息队列 \n");
-            send(sock, sdio_buf, 128, 0);
-        }
-        #endif
+        ESP_LOGI("carll 1","carll_test socket shut down %d \n", sock);
 
-        //shutdown(sock, 0);  //modify_delete carll 
-        //close(sock);
+        shutdown(sock, 0);  //modify_delete carll 
+        close(sock);
+        ESP_LOGI("carll 2","carll_test socket shut down %d \n", sock);
     }
 
 CLEAN_UP:
     close(listen_sock);
     vTaskDelete(NULL);
+}
+
+static void tcp_server_send_task(void* arg)
+{
+    char sdio_buf[128] = {0};
+    for(;;)
+    {
+        /*sdio receive  tcp send*/
+        if( pdTRUE == xQueueReceive(Sdio_to_Tcp__Queue_Handle,sdio_buf,100))
+        {
+            ESP_LOGI("carll","接送到sdio 发送的消息队列 \n");
+            send(sock, sdio_buf, 128, 0);
+        }  
+    }
+}
+
+void send_data_tcp(char*buf, int len)
+{
+   //socks是否可以使用
+    send(sock, buf, len, 0);
+}
+
+
+static void mode_switch(void* arg)
+{
+    for(;;)
+    {
+        if(mode_change == 1)
+        {
+            printf("mode_change INIT mode_role %d\r\n",mode_role);
+            mode_change = 0;
+            switch(mode_role)
+            {
+                case WIFI_CLOSE:
+                    printf("wifi close\r\n");
+                    ESP_ERROR_CHECK(esp_wifi_stop());
+                    
+                break;
+                case WIFI_OPEN:
+                    printf("wifi open\r\n");
+                    ESP_ERROR_CHECK(esp_wifi_start());
+                break;
+
+                default:
+                break;
+            }  
+        }
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
 }
 
 void wifi_init_softap(void)
@@ -231,66 +290,13 @@ void wifi_init_softap(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+
+    //esp_wifi_set_ps(WIFI_PS_NONE); //关闭wifi休眠模式
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
              EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
-}
-
-static void mode_switch(void* arg)
-{
-    for(;;)
-    {
-        if(mode_change == 1)
-        {
-            printf("mode_change INIT mode_role %d\r\n",mode_role);
-            mode_change = 0;
-            switch(mode_role)
-            {
-                case WIFI_CLOSE:
-                    printf("wifi close\r\n");
-                    ESP_ERROR_CHECK(esp_wifi_stop());
-                    
-                break;
-                case WIFI_OPEN:
-                    printf("wifi open\r\n");
-                    ESP_ERROR_CHECK(esp_wifi_start());
-                break;
-
-                default:
-                break;
-            }  
-        }
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-}
-
-static void tcp_server_receive_task(void* arg)
-{
-    char sdio_buf[128] = {0};
-    for(;;)
-    {
-        /*sdio receive  tcp send*/
-        if( pdTRUE == xQueueReceive(My_Queue_Handle,sdio_buf,100))
-        {
-            ESP_LOGI("carll","接送到sdio 发送的消息队列 \n");
-            #if 0
-            struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
-            socklen_t addr_len = sizeof(source_addr);
-            printf("carll test1 \n");
-             int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
-            if (sock < 0)
-            {
-                ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
-                break;
-            }
-            printf("carll test2 \n");
-            #endif
-            send(sock, sdio_buf, 128, 0);
-            //shutdown(sock, 0);
-           // close(sock);
-        }  
-    }
 }
 
 void ap_tcp_server_wifi(void)
@@ -299,7 +305,7 @@ void ap_tcp_server_wifi(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_softap();
 
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 6, NULL);
-    xTaskCreate(mode_switch, "mode_switch", 1024, NULL, 4, NULL);
-    xTaskCreate(tcp_server_receive_task, "tcp_server_receive_task", 4096, NULL, 1, NULL);
+    xTaskCreate(tcp_server_receive_task, "tcp_server", 4096, (void*)AF_INET, 16, NULL);
+    //xTaskCreate(tcp_server_send_task, "tcp_server_send_task", 4096, NULL, 1, NULL);
+    //xTaskCreate(mode_switch, "mode_switch", 1024, NULL, 4, NULL);                                  //选择关闭或者开启wifi
 }

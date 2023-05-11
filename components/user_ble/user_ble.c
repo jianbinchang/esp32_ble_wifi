@@ -1,10 +1,3 @@
-
-
-void func(void)
-{
-
-}
-
 /*
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -1167,7 +1160,7 @@ void user_ble_init(void)
         ESP_LOGE(COEX_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
     }
 
-    esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(200);
+    esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(517);             //200
     if (local_mtu_ret) {
         ESP_LOGE(COEX_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
@@ -1200,6 +1193,7 @@ static void set_ble_peidui(char* str, uint16_t len)
     return ;
 }
 
+void send_data_tcp(char*buf, int len);  //test
 void uart_task(void *pvParameters)
 {
     uart_event_t event;
@@ -1228,6 +1222,10 @@ void uart_task(void *pvParameters)
                                                 gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
                                                 gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
                                                 event.size-2, temp+2, false);  
+                    }
+                    else if((*temp == '$') && (*(temp+1) == '$'))
+                    {
+                        send_data_tcp((char*)(temp+2), event.size-2);
                     }
                     else if(is_connect == true)
                     {

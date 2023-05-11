@@ -11,10 +11,11 @@
 #include "esp_log.h"
 #include "string.h"
 
-#define SDIO_WIFI 0
+#define WIFI_TCP 1
+#define SDIO 0
 
 EventGroupHandle_t Event_Handle = NULL;
-QueueHandle_t Queue_Handle, My_Queue_Handle;
+QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
 
  void app_main(void)
 {
@@ -37,31 +38,39 @@ QueueHandle_t Queue_Handle, My_Queue_Handle;
     spp_uart_init();
 
  //wifi功能暂时没有启用   
-#if SDIO_WIFI
+#if WIFI_TCP
      //creat event group
-    Event_Handle = xEventGroupCreate();
+    Event_Handle = xEventGroupCreate();    //时间组没有使用
     if(Event_Handle == NULL)
     {
         printf("Event_Handle error");
     }
 
-    Queue_Handle = xQueueCreate(2,128);     //creat 2 128 byte queue
-    if(Queue_Handle == NULL)
+    Tcp_To_Sdio_Queue_Handle = xQueueCreate(1,4096);     //升级的字节4096
+    if(Tcp_To_Sdio_Queue_Handle == NULL)
     {
-         printf("Queue_Handle error");
+         printf("Tcp_To_Sdio_Queue_Handle error");
     }
 
-    My_Queue_Handle = xQueueCreate(2,128);  //creat 2 128 byte queue
-    if(My_Queue_Handle == NULL)
+    Sdio_to_Tcp__Queue_Handle = xQueueCreate(1,128);      //linux 板子回复消息字节128
+    if(Sdio_to_Tcp__Queue_Handle == NULL)
     {
-         printf("My_Queue_Handle error");
+         printf("Sdio_to_Tcp__Queue_Handle error");
     }
-
     ap_tcp_server_wifi();
+#endif
 
+#if SDIO
     sdio_init();
 #endif
 
+    return;
+}
+
+
+
+
+/*************************************freertos 示例************************************************/
 #if 0
     while (1)
     {
@@ -87,7 +96,7 @@ QueueHandle_t Queue_Handle, My_Queue_Handle;
 
         #if 0
         char rx_buffer[128];
-        if( pdTRUE == xQueueReceive(Queue_Handle,rx_buffer,100) )
+        if( pdTRUE == xQueueReceive(Tcp_To_Sdio_Queue_Handle,rx_buffer,100) )
         {
             //printf("tcp send queue susessful");
             ESP_LOGI("carll", "接收到 queue susessful %c",rx_buffer[1]);
@@ -95,7 +104,7 @@ QueueHandle_t Queue_Handle, My_Queue_Handle;
         //ESP_LOGI("carll","接收到 queue fail\n");
         if(rx_buffer[1] == '2')
         {
-            if( pdTRUE == xQueueSend(My_Queue_Handle,rx_buffer,0) )  //发送不会阻塞 carll
+            if( pdTRUE == xQueueSend(Sdio_to_Tcp__Queue_Handle,rx_buffer,0) )  //发送不会阻塞 carll
             {
                 ESP_LOGI("carll","发送 queue sucessful\n");
                 memset(rx_buffer,0,128);
@@ -105,5 +114,3 @@ QueueHandle_t Queue_Handle, My_Queue_Handle;
         #endif
     }
 #endif
-    return;
-}
