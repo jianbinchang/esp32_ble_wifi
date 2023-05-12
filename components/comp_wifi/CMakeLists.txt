@@ -1,4 +1,4 @@
-idf_component_register(SRCS "user_wifi.c"
+idf_component_register(SRCS "comp_wifi.c"
                     INCLUDE_DIRS "include"
-                    REQUIRES "user_sdio"
+                    REQUIRES "comp_sdio"
                                         )

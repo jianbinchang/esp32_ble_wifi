@@ -7,6 +7,7 @@ typedef enum {
 } mode_wifi;
 
 
-void ap_tcp_server_wifi(void);
+//void ap_tcp_server_wifi(void);
+void wifi_init_softap(void);
 
 #endif

@@ -1,9 +1,6 @@
+
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "user_gpio.h"
-#include "user_sdio.h"
-#include "user_ble.h"
-#include  "user_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -11,20 +8,19 @@
 #include "esp_log.h"
 #include "string.h"
 
-#define WIFI_TCP 1
-#define SDIO 0
+#include "comp_sdio.h"
+#include "comp_ble.h"
+#include "comp_wifi.h"
 
-EventGroupHandle_t Event_Handle = NULL;
-QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
+#include "key_task.h"
+#include "uart_task.h"
+#include "wifi_task.h"
+
+#define SDIO 0
 
  void app_main(void)
 {
     esp_err_t ret;
-    
-    //init gpio
-    gpio_init();
-
-    //Initialize NVS.
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
     {
@@ -33,17 +29,45 @@ QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
     }
     ESP_ERROR_CHECK(ret);
 
+    keytask_start();
+
     user_ble_init();
 
     spp_uart_init();
 
- //wifi功能暂时没有启用   
-#if WIFI_TCP
+    ap_tcp_server_wifi();
+
+#if SDIO
+    sdio_init();
+#endif
+
+    return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*************************************消息邮箱*************************************************************/
+#if 0
+    EventGroupHandle_t g_Event_Handle = NULL;
+    QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
      //creat event group
-    Event_Handle = xEventGroupCreate();    //时间组没有使用
-    if(Event_Handle == NULL)
+    g_Event_Handle = xEventGroupCreate();    //时间组没有使用
+    if(g_Event_Handle == NULL)
     {
-        printf("Event_Handle error");
+        printf("g_Event_Handle error");
     }
 
     Tcp_To_Sdio_Queue_Handle = xQueueCreate(1,4096);     //升级的字节4096
@@ -57,18 +81,7 @@ QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
     {
          printf("Sdio_to_Tcp__Queue_Handle error");
     }
-    ap_tcp_server_wifi();
 #endif
-
-#if SDIO
-    sdio_init();
-#endif
-
-    return;
-}
-
-
-
 
 /*************************************freertos 示例************************************************/
 #if 0
@@ -77,7 +90,7 @@ QueueHandle_t Tcp_To_Sdio_Queue_Handle, Sdio_to_Tcp__Queue_Handle;
         vTaskDelay(1000 / portTICK_PERIOD_MS);/* code */
         #if 0
         EventBits_t r_event;                                    /* 定义一个事件接收变量 */ 
-                r_event = xEventGroupWaitBits(Event_Handle,     /* 事件对象句柄 */ 
+                r_event = xEventGroupWaitBits(g_Event_Handle,     /* 事件对象句柄 */ 
                               BIT0,                        /* 接收任务感兴趣的事件 */ 
                               pdTRUE,                           /* 退出时清除事件位 */ 
                               pdTRUE,                           /* 满足感兴趣的所有事件 */ 

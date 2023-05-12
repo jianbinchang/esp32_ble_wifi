@@ -37,6 +37,19 @@
     "tuple": "c",
     "type_traits": "c",
     "string": "c",
-    "complex": "c"
+    "complex": "c",
+    "board.h": "c",
+    "user_wifi.h": "c",
+    "wifi_task.h": "c",
+    "sockets.h": "c",
+    "esp_netif.h": "c",
+    "key_task.h": "c",
+    "sys.h": "c",
+    "queue.h": "c",
+    "comp_ble.h": "c",
+    "semphr.h": "c",
+    "esp_log.h": "c",
+    "comp_wifi.h": "c",
+    "esp_event.h": "c"
   }
 }

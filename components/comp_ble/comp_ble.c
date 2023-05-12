@@ -23,9 +23,9 @@
 #include "esp_bt_defs.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
-#include "user_ble.h"
+#include "comp_ble.h"
 #include "driver/gpio.h"
-#include "user_gpio.h"
+#include "key_task.h"                      //平台gpio定义 应该从组件中剥离
 #include "driver/uart.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -61,22 +61,14 @@
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
 
-QueueHandle_t spp_uart_queue = NULL;
-
 static const char remote_device_name[] = "AP8001-0001";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
 
-uint8_t mode_role = 0;
-uint8_t mode_change = 0;
 bool is_connect = false;
 bool is_connect_ap = false;
 static uint16_t spp_conn_id = 0;
 static uint8_t save_flag = 0;
 static uint8_t save_bound_add[7] = {0};
 
-typedef enum {
-    WIFI_CLOSE = 0x0,     /*!< Disable GPIO pull-up resistor */
-    WIFI_OPEN = 0x1,      /*!< Enable GPIO pull-up resistor */
-} mode_wifi;
 
 typedef struct {
     uint8_t                 *prepare_buf;
@@ -1067,7 +1059,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 void user_ble_init(void)
 {
-     printf("user_ble_init \r\n");
+     ESP_LOGI("ble_user","user_ble_init \r\n");
      esp_err_t ret, err;
      nvs_handle_t my_handle;
      size_t required_size;
@@ -1164,12 +1156,11 @@ void user_ble_init(void)
     if (local_mtu_ret) {
         ESP_LOGE(COEX_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-
-    //spp_uart_init();   
+    
     return;
 }
 
-static int save_remote_bound_add()
+int save_remote_bound_add()
 {
     if(is_connect == 1)
     {
@@ -1193,85 +1184,103 @@ static void set_ble_peidui(char* str, uint16_t len)
     return ;
 }
 
-void send_data_tcp(char*buf, int len);  //test
-void uart_task(void *pvParameters)
+
+//作为服务端 向客户端notify数据
+void comp_esp_ble_gatts_send_notify(uint8_t* temp, int len)
 {
-    uart_event_t event;
-    for (;;) 
-    {
-        //Waiting for UART event.
-        if (xQueueReceive(spp_uart_queue, (void * )&event, (TickType_t)portMAX_DELAY)) {
-            switch (event.type) {
-            //Event of UART receving data
-            case UART_DATA:
-                if (event.size) {
-                    uint8_t * temp = NULL;
-                    temp = (uint8_t *)malloc(sizeof(uint8_t)*event.size);
-                    if(temp == NULL){
-                        ESP_LOGE("UART to BLE", "malloc failed,%s L#%d\n", __func__, __LINE__);
-                        break;
-                    }
-                    memset(temp, 0x0, event.size);
-                    uart_read_bytes(UART_NUM_0,temp,event.size,portMAX_DELAY);
-                    esp_log_buffer_hex("UART_RECEV", temp, event.size);
+    ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
+    esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
+                        gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
+                        gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
+                        len-2, temp+2, false);
+}
 
-                    if((*temp == '#') && (*(temp+1) == '#') && (is_connect_ap = true))
-                    {
-                        ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
-                         esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
-                                                gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
-                                                gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
-                                                event.size-2, temp+2, false);  
-                    }
-                    else if((*temp == '$') && (*(temp+1) == '$'))
-                    {
-                        send_data_tcp((char*)(temp+2), event.size-2);
-                    }
-                    else if(is_connect == true)
-                    {
-                        ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
-                        esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
-                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
-                                              gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
-                                              event.size,
-                                              temp,
-                                              ESP_GATT_WRITE_TYPE_NO_RSP,
-                                              ESP_GATT_AUTH_REQ_NONE);
-                    }
 
-                    if(strncmp((char *)temp, "peidui",6) == 0)
-                    {
-                        //printf("peidui \r\n");
-                        save_remote_bound_add();
-                    }
-                    free(temp);
-                }
-                break;
-            default:
-                break;
-            }
+//作为客户端 向服务端写数据
+void comp_esp_ble_gattc_write_char(uint8_t* temp, int len)
+{
+    ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
+    esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
+                            gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
+                            gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
+                            len,
+                            temp,
+                            ESP_GATT_WRITE_TYPE_NO_RSP,
+                            ESP_GATT_AUTH_REQ_NONE);
+}
+
+
+#if 0
+typedef int (*ble_read_callback)(en_ble_event_t evt, void * para);
+
+static ble_read_callback g_event;
+
+void ble_register(ble_read_callback cb)
+{
+    g_event = cb;
+}
+//注册
+
+void gatts_callback(iesp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
+    //    
+    en_ble_event_t evt ;
+    gatts_if --> evt
+
+
+
+    switch (event) {
+    
+    case ESP_GATTC_CONNECT_EVT: {
+        ESP_LOGI(GATTC_TAG, "carll ESP_GATTC_CONNECT_EVT\n");
+        if(p_data->connect.link_role == 1)  //0 master  1 slave
+        {
+            ESP_LOGI(GATTC_TAG, "carll test ...\n");
+            break;
         }
+        ESP_LOGI(GATTC_TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d\n", p_data->connect.conn_id, gattc_if);
+        gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
+        memcpy(gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
+        ESP_LOGI(GATTC_TAG, "REMOTE BDA:");
+        esp_log_buffer_hex(GATTC_TAG, gattc_profile_tab[GATTC_PROFILE_C_APP_ID].remote_bda, sizeof(esp_bd_addr_t));
+        esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);         /*设置安森美的mtu请求*/
+        if (mtu_ret) {
+            ESP_LOGE(GATTC_TAG, "config MTU error, error code = %x\n", mtu_ret);
+        }
+        is_connect = true;
+        spp_conn_id = p_data->connect.conn_id;
+        gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
+
+        g_event(en_ble_connect, 1);
+        break;
     }
-    vTaskDelete(NULL);
+
+    g_event(evt, para);
 }
 
-void spp_uart_init(void)
+////////////////////////////////////////////////////应用层程序
+
+typedef enum {
+    en_ble_connect = 0,
+    en_ble_mode,
+
+    en_ble_max,
+}en_ble_event_t;
+
+int ble_read_callback(en_ble_event_t evt, void * para)
 {
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_RTS,
-        .rx_flow_ctrl_thresh = 122,
-        .source_clk = UART_SCLK_APB,  //UART_SCLK_DEFAULT
-    };
 
-    //Install UART driver, and get the queue.
-    uart_driver_install(UART_NUM_0, 4096, 8192, 20, &spp_uart_queue, 0);
-    //Set UART parameters
-    uart_param_config(UART_NUM_0, &uart_config);
-    //Set UART pins
-    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    xTaskCreate(uart_task, "uTask", 2048, (void*)UART_NUM_0, 8, NULL);
+    switch(evt) {
+        case en_ble_connect:
+            gpio_set();break;
+
+    }
 }
+
+ int main()
+ {
+    ble_register(ble_read_callback);
+ }
+
+
+#endif
