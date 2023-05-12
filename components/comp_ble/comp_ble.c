@@ -10,9 +10,13 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_log.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
@@ -25,10 +29,8 @@
 #include "sdkconfig.h"
 #include "comp_ble.h"
 #include "driver/gpio.h"
-#include "key_task.h"                      //平台gpio定义 应该从组件中剥离
 #include "driver/uart.h"
-#include "nvs_flash.h"
-#include "nvs.h"
+
 
 #define GATTS_SERVICE_UUID_TEST_A   0xFFE0
 #define GATTS_CHAR_UUID_TEST_A      0xFFE1
@@ -60,6 +62,9 @@
 #define NOTIFY_ENABLE               0x0001
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
+
+#define BT_WAKE_AP_R 18                            /*本体连接成功*/
+#define WL_WAKE_AP_R 5                             /*手机连接成功*/
 
 static const char remote_device_name[] = "AP8001-0001";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
 
