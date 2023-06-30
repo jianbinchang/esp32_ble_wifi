@@ -26,7 +26,7 @@ QueueHandle_t g_Event_Handle = NULL;
 
 void send_data_tcp(char*buf, int len)
 {
-   //socks是否可以使用
+   //socks是否可以使用应该加判断
     send(sock, buf, len, 0);
 }
 

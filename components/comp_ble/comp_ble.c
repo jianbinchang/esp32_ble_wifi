@@ -55,7 +55,7 @@
 #define REMOTE_SERVICE_UUID         0xFFE0
 #define REMOTE_NOTIFY_CHAR_UUID     0xFFE1
 #define INVALID_HANDLE              0
-#define GATTS_ADV_NAME              "PUMP-0001"                    //"GATTC_GATTS_COEX"
+#define GATTS_ADV_NAME              "MTU-TEST"                    //PUMP-0001
 #define COEX_TAG                    "GATTC_GATTS_COEX"
 #define GATTC_TAG                   "GATTC_TAG"
 #define GATTS_TAG                   "GATTS_TAG"
@@ -63,10 +63,10 @@
 #define INDICATE_ENABLE             0x0002
 #define NOTIFY_INDICATE_DISABLE     0x0000
 
-#define BT_WAKE_AP_R 18                            /*本体连接成功*/
-#define WL_WAKE_AP_R 5                             /*手机连接成功*/
+#define BT_WAKE_AP_R 18                                              /*本体连接成功*/
+#define WL_WAKE_AP_R 5                                               /*手机连接成功*/
 
-static const char remote_device_name[] = "AP8001-0001";                //ESP_GATTS_DEMO  ESP_SPP_SERVER
+static const char remote_device_name[] = "AP8001-0001";
 
 bool is_connect = false;
 bool is_connect_ap = false;
@@ -727,15 +727,18 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         break;
     }
     case ESP_GATTS_WRITE_EVT: {
-        char temp[255] = {'#','#',};
+        char temp[550] = {'#','#',};     //255
         ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            set_ble_peidui((char*)param->write.value, param->write.len);                        /*app 端设置ble 配对*/
-            memcpy(temp+2, param->write.value, param->write.len);
-            //uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);      /*carll*/
-            uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                      /*add carll 230405 韦工要求app端收取数据加##*/
+            //set_ble_peidui((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
+            //memcpy(temp+2, param->write.value, param->write.len);
+            uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);       /*carll 串口数据发送*/
+                                                                                                
+            //uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                   /*add carll 230405 韦工要求app端收取数据加##*/
+
+            //comp_esp_ble_gatts_send_notify(param->write.value, param->write.len);     /*叶飞测试使用*/
 
             if (gatts_profile_tab[GATTS_PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
@@ -896,6 +899,9 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+
+            set_ble_peidui((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
+
             if (gatts_profile_tab[GATTS_PROFILE_B_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value= param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == NOTIFY_ENABLE) {
@@ -1193,18 +1199,26 @@ static void set_ble_peidui(char* str, uint16_t len)
 //作为服务端 向客户端notify数据
 void comp_esp_ble_gatts_send_notify(uint8_t* temp, int len)
 {
-    ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
+    if(is_connect_ap == false)
+    {
+        return;
+    }
+    //ESP_LOGI(COEX_TAG, "esp_ble_gatts_send_notify\n");
     esp_ble_gatts_send_indicate(gatts_profile_tab[GATTC_PROFILE_C_APP_ID].gatts_if, 
                         gatts_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id, 
                         gatts_profile_tab[GATTS_PROFILE_A_APP_ID].char_handle,
-                        len-2, temp+2, false);
+                        len, temp, false);
 }
 
 
 //作为客户端 向服务端写数据
 void comp_esp_ble_gattc_write_char(uint8_t* temp, int len)
 {
-    ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
+    if(is_connect == false)
+    {
+        return;
+    }
+    //ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");
     esp_ble_gattc_write_char( gattc_profile_tab[GATTC_PROFILE_C_APP_ID].gattc_if,
                             gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id,
                             gattc_profile_tab[GATTC_PROFILE_C_APP_ID].char_handle,
@@ -1216,15 +1230,17 @@ void comp_esp_ble_gattc_write_char(uint8_t* temp, int len)
 
 
 #if 0
-typedef int (*ble_read_callback)(en_ble_event_t evt, void * para);
+typedef int (*ble_read_callback)(en_ble_event_t evt, void * para);     /*驱动层定义回调函数*/
 
 static ble_read_callback g_event;
 
-void ble_register(ble_read_callback cb)
+
+//注册
+void ble_register(ble_read_callback cb)                               /*实现回调函数的注册*/
 {
     g_event = cb;
 }
-//注册
+
 
 void gatts_callback(iesp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
@@ -1265,6 +1281,8 @@ void gatts_callback(iesp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble
 
 ////////////////////////////////////////////////////应用层程序
 
+
+
 typedef enum {
     en_ble_connect = 0,
     en_ble_mode,
@@ -1272,7 +1290,7 @@ typedef enum {
     en_ble_max,
 }en_ble_event_t;
 
-int ble_read_callback(en_ble_event_t evt, void * para)
+int ble_read_callback(en_ble_event_t evt, void * para)  /*应用层实现回调函数*/
 {
 
     switch(evt) {
@@ -1284,7 +1302,7 @@ int ble_read_callback(en_ble_event_t evt, void * para)
 
  int main()
  {
-    ble_register(ble_read_callback);
+    ble_register(ble_read_callback);                  /*注册上回调函数*/
  }
 
 
