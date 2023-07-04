@@ -7,7 +7,7 @@
 #include "esp_log.h"
 #include "string.h"
 
-#include "comp_sdio.h"
+//#include "comp_sdio.h"
 #include "comp_ble.h"
 #include "comp_wifi.h"
 
@@ -15,12 +15,12 @@
 #include "uart_task.h"
 #include "wifi_task.h"
 
-#define SDIO 0
+#include"ota_task.h"
 
  void app_main(void)
 {
-    esp_err_t ret;
-    ret = nvs_flash_init();
+    printf("esp32 version:%.2f\r\n",1.0);
+    esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
     {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -36,9 +36,8 @@
 
     ap_tcp_server_wifi();
 
-#if SDIO
-    sdio_init();
-#endif
+    //ota_task_start();
 
     return;
 }
+    

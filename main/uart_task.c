@@ -2,6 +2,7 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "comp_ble.h"
+#include "ota_task.h"
 
 #define TAG "uart_task"
 QueueHandle_t spp_uart_queue = NULL;
@@ -59,6 +60,14 @@ void uart_task(void *pvParameters)
                         //printf("peidui \r\n");
                         save_remote_bound_add();
                     }
+
+                    else if(strncmp((char *)temp, "ota_updata",6) == 0)
+                    {
+                        //printf("peidui \r\n");
+                        //set_ota_flag();
+
+                    }
+
 
                     comp_esp_ble_gattc_write_char(temp, read_num_sum);
             

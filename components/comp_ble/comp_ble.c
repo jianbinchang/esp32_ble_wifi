@@ -31,6 +31,7 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 
+#include "ota_task.h"
 
 #define GATTS_SERVICE_UUID_TEST_A   0xFFE0
 #define GATTS_CHAR_UUID_TEST_A      0xFFE1
@@ -117,7 +118,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 static void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 static void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
-static void set_ble_peidui(char* str, uint16_t len);
+static void parse_ble_write(char* str, uint16_t len);
 
 static esp_gatt_char_prop_t a_property = 0;
 static esp_gatt_char_prop_t b_property = 0;
@@ -732,11 +733,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            //set_ble_peidui((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
-            //memcpy(temp+2, param->write.value, param->write.len);
-            uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);       /*carll 串口数据发送*/
+            //parse_ble_write((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
+            memcpy(temp+2, param->write.value, param->write.len);
+            //uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);       /*carll 串口数据发送*/
                                                                                                 
-            //uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                   /*add carll 230405 韦工要求app端收取数据加##*/
+            uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                   /*add carll 230405 韦工要求app端收取数据加##*/
 
             //comp_esp_ble_gatts_send_notify(param->write.value, param->write.len);     /*叶飞测试使用*/
 
@@ -900,7 +901,7 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
 
-            set_ble_peidui((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
+            parse_ble_write((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
 
             if (gatts_profile_tab[GATTS_PROFILE_B_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value= param->write.value[1]<<8 | param->write.value[0];
@@ -1184,15 +1185,20 @@ int save_remote_bound_add()
     return 0;
 }
 
-static void set_ble_peidui(char* str, uint16_t len)
+static void parse_ble_write(char* str, uint16_t len)
 {
     if(strncmp(str, "peidui", len) == 0)
     {
-        //printf("set_ble_peidui \r\n");
+        //printf("parse_ble_write \r\n");
         save_remote_bound_add();
     }
-    
-    return ;
+
+
+    if(strncmp(str, "ota_updata", len) == 0)
+    {
+        //ota_start();    //蓝牙串口里直接调用ota会发生蓝牙无法关闭错误
+        //set_ota_flag();
+    }
 }
 
 
@@ -1228,6 +1234,42 @@ void comp_esp_ble_gattc_write_char(uint8_t* temp, int len)
                             ESP_GATT_AUTH_REQ_NONE);
 }
 
+#if 1
+//关闭蓝牙
+#define TAG "ble_stop"
+esp_err_t carll_ble_stop(void)
+{
+    esp_err_t err;
+    ESP_LOGI(TAG, "Free mem at start of simple_ble_stop %d", esp_get_free_heap_size());
+    err = esp_bluedroid_disable();
+    if (err != ESP_OK) {
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "esp_bluedroid_disable called successfully");
+    err = esp_bluedroid_deinit();
+    if (err != ESP_OK) {
+        return err;
+    }
+    ESP_LOGI(TAG, "esp_bluedroid_deinit called successfully");
+    err = esp_bt_controller_disable();
+    if (err != ESP_OK) {
+        return ESP_FAIL;
+    }
+ 
+    /* The API `esp_bt_controller_deinit` will have to be removed when we add support for
+     * `reset to provisioning`
+     */
+    ESP_LOGI(TAG, "esp_bt_controller_disable called successfully");
+    err = esp_bt_controller_deinit();
+    if (err != ESP_OK) {
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "esp_bt_controller_deinit called successfully");
+ 
+    ESP_LOGI(TAG, "Free mem at end of simple_ble_stop %d", esp_get_free_heap_size());
+    return ESP_OK;
+}
+#endif
 
 #if 0
 typedef int (*ble_read_callback)(en_ble_event_t evt, void * para);     /*驱动层定义回调函数*/

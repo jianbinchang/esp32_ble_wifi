@@ -33,7 +33,7 @@
 
 static const char *TAG = "wifi";
 
-#define EXAMPLE_ESP_WIFI_SSID      "PUMP-001"
+#define EXAMPLE_ESP_WIFI_SSID      "PUMP-0"
 #define EXAMPLE_ESP_WIFI_PASS      "12345678"
 #define EXAMPLE_ESP_WIFI_CHANNEL   1
 #define EXAMPLE_MAX_STA_CONN       4
@@ -69,16 +69,33 @@ void wifi_init_softap(void)
                                                         NULL,
                                                         NULL));
 
+    // 获取mac地址
+    uint8_t wifi_mac;
+    char str_temp[10] = {0};
+    esp_base_mac_addr_get(&wifi_mac);
+
+    //ESP_LOGI(TAG, "wifi_mac %d",wifi_mac);
+
+    sprintf(str_temp,"%s%d", EXAMPLE_ESP_WIFI_SSID,wifi_mac);
+
+    //ESP_LOGI(TAG, "wifi_name %s", str_temp);
+
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
+            //.ssid = EXAMPLE_ESP_WIFI_SSID,
+            .ssid_len = strlen(str_temp),
             .channel = EXAMPLE_ESP_WIFI_CHANNEL,
             .password = EXAMPLE_ESP_WIFI_PASS,
             .max_connection = EXAMPLE_MAX_STA_CONN,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK
         },
     };
+
+    memcpy(wifi_config.ap.ssid, str_temp, strlen(str_temp));
+
+    //ESP_LOGI(TAG, "wifi_name_id %s len %d ", wifi_config.ap.ssid, wifi_config.ap.ssid_len);
+
+
     if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
@@ -91,5 +108,5 @@ void wifi_init_softap(void)
     //ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
+             wifi_config.ap.ssid, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
 }
