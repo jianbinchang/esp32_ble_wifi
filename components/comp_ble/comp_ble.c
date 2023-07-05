@@ -1197,7 +1197,7 @@ static void parse_ble_write(char* str, uint16_t len)
     if(strncmp(str, "ota_updata", len) == 0)
     {
         //ota_start();    //蓝牙串口里直接调用ota会发生蓝牙无法关闭错误
-        //set_ota_flag();
+        set_ota_flag();
     }
 }
 

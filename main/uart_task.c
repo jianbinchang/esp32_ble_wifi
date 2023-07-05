@@ -63,9 +63,7 @@ void uart_task(void *pvParameters)
 
                     else if(strncmp((char *)temp, "ota_updata",6) == 0)
                     {
-                        //printf("peidui \r\n");
-                        //set_ota_flag();
-
+                        set_ota_flag();
                     }
 
 

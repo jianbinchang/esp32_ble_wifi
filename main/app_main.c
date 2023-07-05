@@ -36,8 +36,7 @@
 
     ap_tcp_server_wifi();
 
-    //ota_task_start();
+    ota_task_start();
 
     return;
 }
-    

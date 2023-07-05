@@ -173,7 +173,7 @@ static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
 //wifi事件处理
-static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
+static esp_err_t s_wifi_event_handler(void *ctx, system_event_t *event)
 {
     switch (event->event_id) {
         case SYSTEM_EVENT_STA_START:
@@ -217,7 +217,7 @@ static void wifi_init(void)
 {
     tcpip_adapter_init();
     wifi_event_group = xEventGroupCreate();
-    //ESP_ERROR_CHECK(esp_event_loop_init(wifi_event_handler, NULL));    //delet carll 230703
+    //ESP_ERROR_CHECK(esp_event_loop_init(s_wifi_event_handler, NULL));    //delet carll 230703
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
@@ -249,7 +249,7 @@ static void wifi_init(void)
     xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
 }
 
-void ota_start(void)
+void  ota_start(void)
 {
     //先关闭蓝牙和wifi
     if (ESP_OK !=carll_ble_stop())

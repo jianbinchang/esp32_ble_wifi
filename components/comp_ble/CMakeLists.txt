@@ -1,3 +1,3 @@
 idf_component_register(SRCS "comp_ble.c"
-                    INCLUDE_DIRS "include"
-                    REQUIRES bt main)
+                    INCLUDE_DIRS "include" "../../main"
+                    REQUIRES bt )

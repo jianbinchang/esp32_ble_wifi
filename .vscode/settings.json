@@ -50,11 +50,6 @@
     "semphr.h": "c",
     "esp_log.h": "c",
     "comp_wifi.h": "c",
-    "esp_event.h": "c",
-    "esp_http_client.h": "c",
-    "esp_ota_ops.h": "c",
-    "esp_https_ota.h": "c",
-    "esp_wifi.h": "c",
-    "ota_task.h": "c"
+    "esp_event.h": "c"
   }
 }
