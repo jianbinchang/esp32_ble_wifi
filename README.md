@@ -1,7 +1,7 @@
 note: 
 1、ble  b server  发送“peidui”
 2、本体是服务端，esp32是客户端；  esp32是服务端，app是客户端       谁有屏幕谁做客户端去连接
-
+3、增加ota功能
 
 
 
