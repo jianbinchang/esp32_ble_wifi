@@ -50,6 +50,7 @@
     "semphr.h": "c",
     "esp_log.h": "c",
     "comp_wifi.h": "c",
-    "esp_event.h": "c"
+    "esp_event.h": "c",
+    "sstream": "c"
   }
 }

@@ -16,10 +16,11 @@
 #include "wifi_task.h"
 
 #include"ota_task.h"
+float ver = 1.01;
 
  void app_main(void)
 {
-    printf("esp32 version:%.2f\r\n",1.0);
+    printf("esp32 version:%.2f\r\n", ver);
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
     {

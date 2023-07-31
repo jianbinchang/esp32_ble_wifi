@@ -56,7 +56,7 @@
 #define REMOTE_SERVICE_UUID         0xFFE0
 #define REMOTE_NOTIFY_CHAR_UUID     0xFFE1
 #define INVALID_HANDLE              0
-#define GATTS_ADV_NAME              "MTU-TEST"                    //PUMP-0001
+#define GATTS_ADV_NAME              "PUMP-0001"                    //PUMP-0001
 #define COEX_TAG                    "GATTC_GATTS_COEX"
 #define GATTC_TAG                   "GATTC_TAG"
 #define GATTS_TAG                   "GATTS_TAG"
@@ -70,11 +70,11 @@
 static const char remote_device_name[] = "AP8001-0001";
 
 bool is_connect = false;
-bool is_connect_ap = false;
+bool is_connect_app = false;
 static uint16_t spp_conn_id = 0;
 static uint8_t save_flag = 0;
 static uint8_t save_bound_add[7] = {0};
-
+extern float ver;
 
 typedef struct {
     uint8_t                 *prepare_buf;
@@ -313,14 +313,15 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                         {
                             printf("nvs_open \r\n");
                         }
-                        err = nvs_set_blob(my_handle, "save_flag", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+                        err = nvs_set_blob(my_handle, "ble_mac", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
                         if (err != ESP_OK) 
                         {
-                            printf("nvs_set_blob \r\n");
+                            printf("nvs_set_blob fail\r\n");
                         }
                         else
                         {
                             esp_log_buffer_hex("nvs_set_blob", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+                            comp_esp_ble_gatts_send_notify(scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
                         }
                          // Commit
                         err = nvs_commit(my_handle);
@@ -381,9 +382,9 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     case ESP_GATTC_CONNECT_EVT: {
         ESP_LOGI(GATTC_TAG, "carll ESP_GATTC_CONNECT_EVT\n");
-        if(p_data->connect.link_role == 1)  //0 master  1 slave
+        if(p_data->connect.link_role == 1)  //0 master client  benti   1 slave  server  client
         {
-            ESP_LOGI(GATTC_TAG, "carll test ...\n");
+            ESP_LOGI(GATTC_TAG, "link_role app connect break ...\n");
             break;
         }
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d\n", p_data->connect.conn_id, gattc_if);
@@ -399,6 +400,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         spp_conn_id = p_data->connect.conn_id;
         gattc_profile_tab[GATTC_PROFILE_C_APP_ID].conn_id = p_data->connect.conn_id;
         gpio_set_level(BT_WAKE_AP_R, 1);  /*本体连接成功*/
+        ESP_LOGI(GATTS_TAG, "本体连接成功\n");
         break;
     }
     case ESP_GATTC_OPEN_EVT:                                                                        /*gap 里面有open gatts*/
@@ -595,11 +597,18 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         ESP_LOGI(GATTC_TAG, "write char success \n");
         break;
     case ESP_GATTC_DISCONNECT_EVT: {
+        //ESP_LOGI(GATTC_TAG, "*********app************%d\n",p_data->connect.link_role);        //0  master client  1 slave server     app benti all 0                           
+        if(memcmp(p_data->disconnect.remote_bda, save_bound_add, ESP_BD_ADDR_LEN) != 0)
+        {
+            ESP_LOGI(GATTC_TAG, "*********app************ ...\n");
+            break;
+        }
+
         connect = false;                      /*scan 标志*/
         is_connect = false;
         get_server = false;
+        ESP_LOGI(GATTS_TAG, "本体断开连接\n");
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_DISCONNECT_EVT carll, reason = %d\n", p_data->disconnect.reason);
-        //ESP_LOGI(GATTC_TAG, "p_data->connect.conn_id = %s\n",p_data->disconnect.remote_bda);
         //free_gattc_srv_db();
         ESP_LOGI(GATTC_TAG, "DISCONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x\n",
                  p_data->disconnect.conn_id,
@@ -721,8 +730,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 6;
-        memcpy(rsp.attr_value.value, save_bound_add, rsp.attr_value.len);
+        rsp.attr_value.len = 2;  //这里可以打印版本  read 响应
+        uint8_t ver_temp[3];
+        ver_temp[0] =  (int)(ver*100)/100;
+        ver_temp[1] =  (int)(ver*100)%100;
+        memcpy(rsp.attr_value.value, ver_temp, rsp.attr_value.len);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -733,7 +745,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep) {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            //parse_ble_write((char*)param->write.value, param->write.len);                      /*app 端设置ble 配对  可以放在b server中*/
             memcpy(temp+2, param->write.value, param->write.len);
             //uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);       /*carll 串口数据发送*/
                                                                                                 
@@ -841,7 +852,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         gatts_profile_tab[GATTS_PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
 
         gpio_set_level(WL_WAKE_AP_R, 1);  /*手机连接成功*/
-        is_connect_ap = true;
+        ESP_LOGI(GATTS_TAG, "手机连接成功\n");
+        is_connect_app = true;
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -855,7 +867,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         {
             esp_ble_gap_start_advertising(&adv_params);
             gpio_set_level(WL_WAKE_AP_R, 0);  /*手机断开连接*/
-            is_connect_ap = false;
+            ESP_LOGI(GATTS_TAG, "手机断开连接\n");
+            is_connect_app = false;
         }
         break;
     case ESP_GATTS_CONF_EVT:
@@ -886,11 +899,8 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 4;
-        rsp.attr_value.value[0] = 0xde;
-        rsp.attr_value.value[1] = 0xed;
-        rsp.attr_value.value[2] = 0xbe;
-        rsp.attr_value.value[3] = 0xef;
+        rsp.attr_value.len = 6;
+        memcpy(rsp.attr_value.value, save_bound_add, rsp.attr_value.len);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -1080,14 +1090,14 @@ void user_ble_init(void)
     {
          printf("nvs_open %d\r\n",err);
     }
-    err = nvs_get_blob(my_handle, "save_flag", save_bound_add, &required_size);
+    err = nvs_get_blob(my_handle, "ble_mac", save_bound_add, &required_size);
     if (err != ESP_OK) 
     {
-        printf("nvs_get_blob %d required_size: %d \r\n",err,required_size);
+        printf("nvs_get_blob %d required_size: %d \r\n", err, required_size);
     }
     else
     {
-         esp_log_buffer_hex("nvs_get_blob", save_bound_add, ESP_BD_ADDR_LEN);
+         esp_log_buffer_hex("**********nvs_get_blob************", save_bound_add, ESP_BD_ADDR_LEN);
     }
    
     if (required_size == 0) 
@@ -1205,7 +1215,7 @@ static void parse_ble_write(char* str, uint16_t len)
 //作为服务端 向客户端notify数据
 void comp_esp_ble_gatts_send_notify(uint8_t* temp, int len)
 {
-    if(is_connect_ap == false)
+    if(is_connect_app == false)
     {
         return;
     }
@@ -1222,6 +1232,7 @@ void comp_esp_ble_gattc_write_char(uint8_t* temp, int len)
 {
     if(is_connect == false)
     {
+        ESP_LOGI("carll", "is_connect == false");
         return;
     }
     //ESP_LOGI(COEX_TAG, "esp_ble_gattc_write_char\n");

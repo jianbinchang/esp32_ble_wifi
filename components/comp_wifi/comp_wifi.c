@@ -33,7 +33,7 @@
 
 static const char *TAG = "wifi";
 
-#define EXAMPLE_ESP_WIFI_SSID      "PUMP-0"
+#define EXAMPLE_ESP_WIFI_SSID      "PUMP-"
 #define EXAMPLE_ESP_WIFI_PASS      "12345678"
 #define EXAMPLE_ESP_WIFI_CHANNEL   1
 #define EXAMPLE_MAX_STA_CONN       4
@@ -70,15 +70,14 @@ void wifi_init_softap(void)
                                                         NULL));
 
     // 获取mac地址
-    uint8_t wifi_mac;
-    char str_temp[10] = {0};
+    uint8_t wifi_mac[6];
+    char str_temp[20] = {0};
     esp_base_mac_addr_get(&wifi_mac);
 
-    //ESP_LOGI(TAG, "wifi_mac %d",wifi_mac);
+    ESP_LOGI(TAG, "wifi_mac %x",wifi_mac[0]);
+    //ESP_LOG_BUFFER_HEX("carll", wifi_mac, 6);
 
-    sprintf(str_temp,"%s%d", EXAMPLE_ESP_WIFI_SSID,wifi_mac);
-
-    //ESP_LOGI(TAG, "wifi_name %s", str_temp);
+    sprintf(str_temp,"%s%X%X", EXAMPLE_ESP_WIFI_SSID,wifi_mac[3],wifi_mac[4]);
 
     wifi_config_t wifi_config = {
         .ap = {

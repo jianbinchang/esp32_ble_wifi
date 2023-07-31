@@ -47,27 +47,24 @@ void uart_task(void *pvParameters)
 
                     //esp_log_buffer_hex("carll ", temp, read_num_sum);      /*大量发送数据会发生死机*/
 
-                    if((*temp == '#') && (*(temp+1) == '#') /*&& (is_connect_ap == true)*/)
+                    if((*temp == '#') && (*(temp+1) == '#') /*&& (is_connect_ap == true)*/)    //##是通过蓝牙向手机发送数据
                     {
                         comp_esp_ble_gatts_send_notify(temp+2, read_num_sum-2);
                     }
-                    else if((*temp == '$') && (*(temp+1) == '$'))
+                    else if((*temp == '$') && (*(temp+1) == '$'))                              //$$是通过网口向app发送数据
                     {
                         send_data_tcp((char*)(temp+2), read_num_sum-2);
                     }
                     else if(strncmp((char *)temp, "peidui",6) == 0)
                     {
-                        //printf("peidui \r\n");
                         save_remote_bound_add();
                     }
-
                     else if(strncmp((char *)temp, "ota_updata",6) == 0)
                     {
                         set_ota_flag();
                     }
 
-
-                    comp_esp_ble_gattc_write_char(temp, read_num_sum);
+                    comp_esp_ble_gattc_write_char(temp, read_num_sum);                           //向本体蓝牙发送数据
             
                     read_temp = temp;
                     memset(temp, 0x0, read_num_sum);
