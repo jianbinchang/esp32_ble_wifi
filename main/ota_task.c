@@ -98,9 +98,7 @@ void simple_ota_example_task(void *pvParameter)
 #endif
     //http客户端配置
     esp_http_client_config_t config = {
-        //.url = CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL,  //注释掉
-        .url = "http://192.168.31.129:8070/build//gattc_gatts_coex.bin",
-        //.url = "http://subluego.oss-cn-beijing.aliyuncs.com/test/hello-world.bin",      //增加
+        .url = "http://subluego.oss-cn-beijing.aliyuncs.com/test/esp32/gattc_gatts_coex.bin",      //增加
         .cert_pem = (char *)server_cert_pem_start,
         .event_handler = _http_event_handler,
         .keep_alive_enable = true,
@@ -130,6 +128,7 @@ void simple_ota_example_task(void *pvParameter)
     // http ota下载固件
     esp_err_t ret = esp_https_ota(&config);
     if (ret == ESP_OK) {
+        printf("ota_sucessful\n");
         esp_restart();//OTA成功，重启系统
     } else {
         ESP_LOGE(TAG, "Firmware upgrade failed");
@@ -173,6 +172,7 @@ static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
 //wifi事件处理
+#if 0
 static esp_err_t s_wifi_event_handler(void *ctx, system_event_t *event)
 {
     switch (event->event_id) {
@@ -192,6 +192,7 @@ static esp_err_t s_wifi_event_handler(void *ctx, system_event_t *event)
     }
     return ESP_OK;
 }
+#endif
 
 static void carll_wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)

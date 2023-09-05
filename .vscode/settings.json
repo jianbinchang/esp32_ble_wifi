@@ -1,6 +1,6 @@
 {
   "C_Cpp.intelliSenseEngine": "Tag Parser",
-  "idf.portWin": "COM20",
+  "idf.portWin": "COM11",
   "idf.flashType": "UART",
   "idf.adapterTargetName": "esp32",
   "files.associations": {
@@ -51,6 +51,21 @@
     "esp_log.h": "c",
     "comp_wifi.h": "c",
     "esp_event.h": "c",
-    "sstream": "c"
+    "sstream": "c",
+    "i2c.h": "c",
+    "deque": "c",
+    "list": "c",
+    "unordered_map": "c",
+    "unordered_set": "c",
+    "vector": "c",
+    "algorithm": "c",
+    "*.tcc": "c",
+    "fstream": "c",
+    "soft_i2c.h": "c",
+    "string.h": "c",
+    "unistd.h": "c",
+    "esp32_i2c.h": "c",
+    "eulersensor.h": "c",
+    "comp_sdio.h": "c"
   }
 }

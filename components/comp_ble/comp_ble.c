@@ -32,6 +32,7 @@
 #include "driver/uart.h"
 
 #include "ota_task.h"
+#include "eulersensor.h"
 
 #define GATTS_SERVICE_UUID_TEST_A   0xFFE0
 #define GATTS_CHAR_UUID_TEST_A      0xFFE1
@@ -74,7 +75,7 @@ bool is_connect_app = false;
 static uint16_t spp_conn_id = 0;
 static uint8_t save_flag = 0;
 static uint8_t save_bound_add[7] = {0};
-extern float ver;
+extern char* ver;
 
 typedef struct {
     uint8_t                 *prepare_buf;
@@ -231,6 +232,28 @@ static struct gattc_profile_inst gattc_profile_tab[GATTC_PROFILE_NUM] = {
     },
 };
 
+
+/**
+*********************************************************************************************************************
+* @fn          :  get_check_xor()
+* @brief       :  检验和计算
+* @param[in]   :  none
+* @return      :  找到返回,位置指针，找不到返回NULL
+* @note        :  revision history:
+* @note        :  version 1.0,written by GAL,2018-05-15
+**********************************************************************************************************************/
+static uint8_t get_check_xor(const uint8_t *check_buf, const uint16_t buf_len)
+{
+    uint16_t cnt = 0 ;
+    uint8_t return_check_value = 0;
+
+    for(cnt = 0 ; cnt < buf_len ; cnt ++)        //计算校验
+    {
+        return_check_value ^=  check_buf[ cnt ] ;
+    }
+    return  return_check_value ;
+}
+
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     uint8_t *adv_name = NULL;
@@ -338,7 +361,9 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                         }
 
                        memcpy(save_bound_add, scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+
                        save_flag = 0;
+                       printf("ble_mac_set_ok\n");
                     }
 
                     if (connect == false) {
@@ -370,6 +395,11 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)   /*esp32 客户端（主机）   app客户端（主机） 都由这个回调处理*/
 {
+    //六轴变量
+    float roll, pitch, yaw;
+    uint8_t offset = 0;
+    uint8_t imu_temp[30]={0};
+    uint8_t xor_val;
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
 
     switch (event) {
@@ -559,7 +589,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             ESP_LOGI(GATTC_TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
         }
         esp_log_buffer_hex(GATTC_TAG, p_data->notify.value, p_data->notify.value_len);
-
+        
         uart_write_bytes(UART_NUM_0, (char *)(p_data->notify.value), p_data->notify.value_len);/*carll*/
         break;
     case ESP_GATTC_WRITE_DESCR_EVT:
@@ -730,11 +760,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 2;  //这里可以打印版本  read 响应
-        uint8_t ver_temp[3];
-        ver_temp[0] =  (int)(ver*100)/100;
-        ver_temp[1] =  (int)(ver*100)%100;
-        memcpy(rsp.attr_value.value, ver_temp, rsp.attr_value.len);
+        // rsp.attr_value.len = 2;  //这里可以打印版本  read 响应
+        // uint8_t ver_temp[3];
+        // ver_temp[0] =  (int)(ver*100)/100;
+        // ver_temp[1] =  (int)(ver*100)%100;
+
+        rsp.attr_value.len = strlen(ver);
+        memcpy(rsp.attr_value.value, ver, rsp.attr_value.len);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -748,9 +780,9 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             memcpy(temp+2, param->write.value, param->write.len);
             //uart_write_bytes(UART_NUM_0, (char *)(param->write.value), param->write.len);       /*carll 串口数据发送*/
                                                                                                 
-            uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                   /*add carll 230405 韦工要求app端收取数据加##*/
+            uart_write_bytes(UART_NUM_0, (char *)temp, param->write.len+2);                       /*add carll 230405 韦工要求app端收取数据加##*/
 
-            //comp_esp_ble_gatts_send_notify(param->write.value, param->write.len);     /*叶飞测试使用*/
+            //comp_esp_ble_gatts_send_notify(param->write.value, param->write.len);               /*叶飞测试使用*/
 
             if (gatts_profile_tab[GATTS_PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2) {
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
@@ -1084,7 +1116,9 @@ void user_ble_init(void)
      ESP_LOGI("ble_user","user_ble_init \r\n");
      esp_err_t ret, err;
      nvs_handle_t my_handle;
-     size_t required_size;
+     size_t required_size = sizeof(save_bound_add);
+     //printf("ble_mac required_size %d\n", required_size);
+
      err = nvs_open("storage", NVS_READWRITE, &my_handle);
     if (err != ESP_OK) 
     {
@@ -1199,7 +1233,6 @@ static void parse_ble_write(char* str, uint16_t len)
 {
     if(strncmp(str, "peidui", len) == 0)
     {
-        //printf("parse_ble_write \r\n");
         save_remote_bound_add();
     }
 

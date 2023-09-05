@@ -74,7 +74,7 @@ void wifi_init_softap(void)
     char str_temp[20] = {0};
     esp_base_mac_addr_get(&wifi_mac);
 
-    ESP_LOGI(TAG, "wifi_mac %x",wifi_mac[0]);
+    ESP_LOGI(TAG, "wifi_mac %x", wifi_mac[0]);
     //ESP_LOG_BUFFER_HEX("carll", wifi_mac, 6);
 
     sprintf(str_temp,"%s%X%X", EXAMPLE_ESP_WIFI_SSID,wifi_mac[3],wifi_mac[4]);
